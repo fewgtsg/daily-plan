@@ -10,7 +10,7 @@ use crate::parser::extract_tags;
 pub fn sync_entry_tags(state: State<'_, Mutex<Connection>>, date: String, content: String) -> Result<(), String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     let parsed = extract_tags(&content);
-    crate::db::replace_entry_tags(&conn, &date, &parsed.names).map_err(|e| e.to_string())
+    crate::db::replace_entry_tags(&conn, &date, &parsed.tags).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -35,7 +35,7 @@ pub fn get_task_tags(state: State<'_, Mutex<Connection>>, task_id: i64) -> Resul
 pub fn sync_task_tags(state: State<'_, Mutex<Connection>>, task_id: i64, content: String) -> Result<(), String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     let parsed = extract_tags(&content);
-    crate::db::replace_task_tags(&conn, task_id, &parsed.names).map_err(|e| e.to_string())
+    crate::db::replace_task_tags(&conn, task_id, &parsed.tags).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

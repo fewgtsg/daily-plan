@@ -5,52 +5,72 @@ mod tests {
     #[test]
     fn extracts_simple_tags() {
         let result = extract_tags("今天 #工作 进展顺利 #灵感");
-        assert_eq!(result.names, vec!["工作", "灵感"]);
+        assert_eq!(result.tags.len(), 2);
+        assert_eq!(result.tags[0].normalized, "工作");
+        assert_eq!(result.tags[1].normalized, "灵感");
     }
 
     #[test]
     fn lowercases_tags() {
         let result = extract_tags("#Work #WORK");
-        assert_eq!(result.names, vec!["work", "work"]);
+        assert_eq!(result.tags.len(), 2);
+        assert_eq!(result.tags[0].normalized, "work");
+        assert_eq!(result.tags[1].normalized, "work");
+    }
+
+    #[test]
+    fn preserves_original_casing() {
+        let result = extract_tags("#Work #WORK");
+        assert_eq!(result.tags[0].original, "Work");
+        assert_eq!(result.tags[0].normalized, "work");
+        assert_eq!(result.tags[1].original, "WORK");
+        assert_eq!(result.tags[1].normalized, "work");
     }
 
     #[test]
     fn ignores_pure_numeric_tag() {
         let result = extract_tags("#123 和 #项目2");
-        assert_eq!(result.names, vec!["项目2"]);
+        assert_eq!(result.tags.len(), 1);
+        assert_eq!(result.tags[0].normalized, "项目2");
     }
 
     #[test]
     fn ignores_tag_with_punctuation() {
         let result = extract_tags("今天#工作，还有#灵感。");
-        assert_eq!(result.names, vec!["工作", "灵感"]);
+        assert_eq!(result.tags.len(), 2);
+        assert_eq!(result.tags[0].normalized, "工作");
+        assert_eq!(result.tags[1].normalized, "灵感");
     }
 
     #[test]
     fn limits_tag_length() {
         let long = "a".repeat(51);
         let result = extract_tags(&format!("#{} #ok", long));
-        assert_eq!(result.names, vec!["ok"]);
+        assert_eq!(result.tags.len(), 1);
+        assert_eq!(result.tags[0].normalized, "ok");
     }
 
     #[test]
     fn accepts_fifty_unicode_chars() {
         let tag = "工".repeat(50);
         let result = extract_tags(&format!("#{}", tag));
-        assert_eq!(result.names.len(), 1);
+        assert_eq!(result.tags.len(), 1);
     }
 
     #[test]
     fn rejects_fifty_one_unicode_chars() {
         let tag = "工".repeat(51);
         let result = extract_tags(&format!("#{}", tag));
-        assert!(result.names.is_empty());
+        assert!(result.tags.is_empty());
     }
 
     #[test]
     fn preserves_duplicate_tags() {
         let result = extract_tags("#工作 #工作 #学习");
-        assert_eq!(result.names, vec!["工作", "工作", "学习"]);
+        assert_eq!(result.tags.len(), 3);
+        assert_eq!(result.tags[0].normalized, "工作");
+        assert_eq!(result.tags[1].normalized, "工作");
+        assert_eq!(result.tags[2].normalized, "学习");
     }
 
     #[test]

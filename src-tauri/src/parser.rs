@@ -1,8 +1,13 @@
 use regex::Regex;
 use std::sync::OnceLock;
 
+pub struct ParsedTag {
+    pub original: String,
+    pub normalized: String,
+}
+
 pub struct ParsedTags {
-    pub names: Vec<String>,
+    pub tags: Vec<ParsedTag>,
 }
 
 pub struct ParsedTaskLink {
@@ -22,14 +27,17 @@ fn task_link_regex() -> &'static Regex {
 }
 
 pub fn extract_tags(text: &str) -> ParsedTags {
-    let mut names = Vec::new();
+    let mut tags = Vec::new();
     for cap in tag_regex().captures_iter(text) {
-        let name = cap[1].to_lowercase();
-        if !name.chars().all(|c| c.is_ascii_digit()) && name.chars().count() <= 50 {
-            names.push(name);
+        let original = cap[1].to_string();
+        let normalized = original.to_lowercase();
+        if !normalized.chars().all(|c| c.is_ascii_digit())
+            && normalized.chars().count() <= 50
+        {
+            tags.push(ParsedTag { original, normalized });
         }
     }
-    ParsedTags { names }
+    ParsedTags { tags }
 }
 
 pub fn extract_task_links(text: &str) -> Vec<ParsedTaskLink> {
