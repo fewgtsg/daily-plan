@@ -4,6 +4,9 @@ use tauri::Manager;
 mod commands;
 mod db;
 mod models;
+mod parser;
+#[cfg(test)]
+mod parser_tests;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
