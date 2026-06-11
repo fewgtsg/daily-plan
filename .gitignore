@@ -29,3 +29,6 @@ Cargo.lock
 
 # Brainstorming artifacts
 .superpowers/
+
+# Git worktrees
+.worktrees/
