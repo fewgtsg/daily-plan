@@ -26,3 +26,6 @@ dist-ssr
 # Rust
 src-tauri/target
 Cargo.lock
+
+# Brainstorming artifacts
+.superpowers/
