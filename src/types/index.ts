@@ -23,3 +23,30 @@ export interface SearchResult {
   date: string | null;
   content: string;
 }
+
+export interface Tag {
+  id: number;
+  name: string;
+  displayName?: string;
+  usageCount: number;
+}
+
+export interface TaskLink {
+  id: number;
+  entryId: number;
+  taskId?: number;
+  rawText: string;
+  position: number;
+  taskTitle?: string;
+}
+
+export interface AppSettings {
+  sidebarCollapsed?: boolean;
+  windowWidth?: number;
+  windowHeight?: number;
+}
+
+export interface TagSearchResult {
+  entries: Entry[];
+  tasks: Task[];
+}
