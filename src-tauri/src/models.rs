@@ -37,7 +37,7 @@ pub struct SearchResult {
     pub content: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TagDto {
     pub id: i64,
     pub name: String,

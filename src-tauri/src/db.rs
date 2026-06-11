@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, OptionalExtension, Result, Transaction};
 use std::fs;
 use tauri::Manager;
 
@@ -127,92 +127,148 @@ fn create_v2_tables(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn replace_entry_tags(conn: &Connection, date: &str, tags: &[String]) -> Result<()> {
-    // Deduplicate tags before processing
-    let unique_tags: Vec<String> = tags.iter().cloned().collect::<std::collections::HashSet<_>>().into_iter().collect();
+fn dedup_tags_preserve_order(tags: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut result = Vec::new();
+    for tag in tags {
+        let normalized = tag.to_lowercase();
+        if seen.insert(normalized) {
+            result.push(tag.clone());
+        }
+    }
+    result
+}
 
-    let entry_id: i64 = conn.query_row(
+fn ensure_tag(tx: &Transaction, name: &str, display_name: &str) -> Result<i64> {
+    tx.execute(
+        "INSERT INTO tags (name, display_name, created_at) VALUES (?1, ?2, datetime('now'))
+         ON CONFLICT(name) DO UPDATE SET display_name = COALESCE(tags.display_name, excluded.display_name)",
+        [name, display_name],
+    )?;
+    let tag_id: i64 = tx.query_row(
+        "SELECT id FROM tags WHERE name = ?1",
+        [name],
+        |row| row.get(0),
+    )?;
+    Ok(tag_id)
+}
+
+pub fn replace_entry_tags(conn: &Connection, date: &str, tags: &[String]) -> Result<()> {
+    let unique_tags = dedup_tags_preserve_order(tags);
+
+    let entry_id: Option<i64> = conn.query_row(
         "SELECT id FROM entries WHERE date = ?1",
         [date],
         |row| row.get(0),
-    )?;
-    conn.execute("DELETE FROM entry_tags WHERE entry_id = ?1", [entry_id])?;
+    ).optional()?;
+    let entry_id = match entry_id {
+        Some(id) => id,
+        None => return Ok(()),
+    };
+
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM entry_tags WHERE entry_id = ?1", [entry_id])?;
     for name in &unique_tags {
-        conn.execute(
-            "INSERT INTO tags (name, display_name, created_at) VALUES (?1, ?2, datetime('now'))
-             ON CONFLICT(name) DO UPDATE SET display_name = COALESCE(excluded.display_name, display_name)",
-            [name.as_str(), name.as_str()],
-        )?;
-        let tag_id: i64 = conn.query_row(
-            "SELECT id FROM tags WHERE name = ?1",
-            [name.as_str()],
-            |row| row.get(0),
-        )?;
-        conn.execute(
+        let tag_id = ensure_tag(&tx, name.as_str(), name.as_str())?;
+        tx.execute(
             "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
             [entry_id, tag_id],
         )?;
     }
-    Ok(())
+    tx.commit()
 }
 
 pub fn replace_task_tags(conn: &Connection, task_id: i64, tags: &[String]) -> Result<()> {
-    let unique_tags: Vec<String> = tags.iter().cloned().collect::<std::collections::HashSet<_>>().into_iter().collect();
-    conn.execute("DELETE FROM task_tags WHERE task_id = ?1", [task_id])?;
+    let unique_tags = dedup_tags_preserve_order(tags);
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM task_tags WHERE task_id = ?1", [task_id])?;
     for name in &unique_tags {
-        conn.execute(
-            "INSERT INTO tags (name, display_name, created_at) VALUES (?1, ?2, datetime('now'))
-             ON CONFLICT(name) DO UPDATE SET display_name = COALESCE(excluded.display_name, display_name)",
-            [name.as_str(), name.as_str()],
-        )?;
-        let tag_id: i64 = conn.query_row(
-            "SELECT id FROM tags WHERE name = ?1",
-            [name.as_str()],
-            |row| row.get(0),
-        )?;
-        conn.execute(
+        let tag_id = ensure_tag(&tx, name.as_str(), name.as_str())?;
+        tx.execute(
             "INSERT OR IGNORE INTO task_tags (task_id, tag_id) VALUES (?1, ?2)",
             [task_id, tag_id],
         )?;
     }
-    Ok(())
+    tx.commit()
+}
+
+fn validate_tag_name(tag_name: &str) -> Result<String> {
+    let trimmed = tag_name.trim();
+    if trimmed.is_empty() {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "Tag name cannot be empty".to_string(),
+        ));
+    }
+    if trimmed.chars().count() > 50 {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "Tag name must be 50 characters or fewer".to_string(),
+        ));
+    }
+    if trimmed.chars().all(|c| c.is_ascii_digit()) {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "Tag name cannot be purely numeric".to_string(),
+        ));
+    }
+    if !trimmed.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "Tag name can only contain letters, numbers, underscores, and hyphens".to_string(),
+        ));
+    }
+    Ok(trimmed.to_string())
 }
 
 pub fn add_tag_to_entry(conn: &Connection, date: &str, tag_name: &str) -> Result<()> {
+    let trimmed = validate_tag_name(tag_name)?;
+    let normalized = trimmed.to_lowercase();
+
     let entry_id: i64 = conn.query_row(
         "SELECT id FROM entries WHERE date = ?1",
         [date],
         |row| row.get(0),
     )?;
-    let normalized = tag_name.to_lowercase();
-    conn.execute(
-        "INSERT INTO tags (name, display_name, created_at) VALUES (?1, ?2, datetime('now'))
-         ON CONFLICT(name) DO UPDATE SET display_name = COALESCE(excluded.display_name, display_name)",
-        [&normalized, tag_name],
-    )?;
-    let tag_id: i64 = conn.query_row(
-        "SELECT id FROM tags WHERE name = ?1",
-        [&normalized],
-        |row| row.get(0),
-    )?;
-    conn.execute(
+
+    let tx = conn.unchecked_transaction()?;
+    let tag_id = ensure_tag(&tx, &normalized, &trimmed)?;
+    tx.execute(
         "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
         [entry_id, tag_id],
     )?;
-    Ok(())
+    tx.commit()
 }
 
 pub fn get_entry_tags(conn: &Connection, date: &str) -> Result<Vec<TagDto>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.name, t.display_name, COUNT(et2.tag_id) as usage_count
+        "SELECT t.id, t.name, t.display_name,
+                (SELECT COUNT(*) FROM entry_tags et WHERE et.tag_id = t.id) +
+                (SELECT COUNT(*) FROM task_tags tt WHERE tt.tag_id = t.id) AS usage_count
          FROM tags t
          JOIN entry_tags et ON et.tag_id = t.id
          JOIN entries e ON e.id = et.entry_id
-         LEFT JOIN entry_tags et2 ON et2.tag_id = t.id
          WHERE e.date = ?1
          GROUP BY t.id"
     )?;
     let rows = stmt.query_map([date], |row| {
+        Ok(TagDto {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            display_name: row.get(2)?,
+            usage_count: row.get(3)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn get_task_tags(conn: &Connection, task_id: i64) -> Result<Vec<TagDto>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.name, t.display_name,
+                (SELECT COUNT(*) FROM entry_tags et WHERE et.tag_id = t.id) +
+                (SELECT COUNT(*) FROM task_tags tt WHERE tt.tag_id = t.id) AS usage_count
+         FROM tags t
+         JOIN task_tags tt ON tt.tag_id = t.id
+         WHERE tt.task_id = ?1
+         ORDER BY t.name ASC"
+    )?;
+    let rows = stmt.query_map([task_id], |row| {
         Ok(TagDto {
             id: row.get(0)?,
             name: row.get(1)?,
@@ -306,4 +362,13 @@ pub fn backup_db(app_handle: &tauri::AppHandle) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+pub fn init_test_db() -> Result<Connection> {
+    let conn = Connection::open_in_memory()?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    create_tables(&conn)?;
+    create_v2_tables(&conn)?;
+    Ok(conn)
 }

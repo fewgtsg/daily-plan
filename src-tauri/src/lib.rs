@@ -7,6 +7,8 @@ mod models;
 mod parser;
 #[cfg(test)]
 mod parser_tests;
+#[cfg(test)]
+mod tag_tests;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -42,6 +44,7 @@ pub fn run() {
             commands::tags::add_tag_to_entry,
             commands::tags::get_entry_tags,
             commands::tags::sync_task_tags,
+            commands::tags::get_task_tags,
             commands::tags::get_all_tags,
             commands::tags::search_by_tag,
         ])
