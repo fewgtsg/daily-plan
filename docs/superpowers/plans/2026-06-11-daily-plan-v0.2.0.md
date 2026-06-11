@@ -169,7 +169,7 @@
   }
 
   fn task_link_regex() -> &'static Regex {
-      static RE: OnceLock<Regex> = Regex::new(r"\[\[([^\]]+)\]\]");
+      static RE: OnceLock<Regex> = OnceLock::new();
       RE.get_or_init(|| Regex::new(r"\[\[([^\]]+)\]\]").unwrap())
   }
 
@@ -340,14 +340,92 @@
   }
   ```
 
-- [ ] **Step 4: Add similar helpers for tasks**
+- [ ] **Step 4: Add manual tag helpers**
+
+  Add to `src-tauri/src/db.rs`:
+
+  ```rust
+  pub fn add_tag_to_entry(conn: &Connection, date: &str, tag_name: &str) -> Result<()> {
+      let entry_id: i64 = conn.query_row(
+          "SELECT id FROM entries WHERE date = ?1",
+          [date],
+          |row| row.get(0),
+      )?;
+      let normalized = tag_name.to_lowercase();
+      conn.execute(
+          "INSERT INTO tags (name, display_name, created_at) VALUES (?1, ?2, datetime('now'))
+           ON CONFLICT(name) DO UPDATE SET display_name = COALESCE(excluded.display_name, display_name)",
+          [&normalized, tag_name],
+      )?;
+      let tag_id: i64 = conn.query_row(
+          "SELECT id FROM tags WHERE name = ?1",
+          [&normalized],
+          |row| row.get(0),
+      )?;
+      conn.execute(
+          "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
+          [entry_id, tag_id],
+      )?;
+      Ok(())
+  }
+
+  pub fn get_entry_tags(conn: &Connection, date: &str) -> Result<Vec<TagDto>> {
+      let mut stmt = conn.prepare(
+          "SELECT t.id, t.name, t.display_name, COUNT(et2.tag_id) as usage_count
+           FROM tags t
+           JOIN entry_tags et ON et.tag_id = t.id
+           JOIN entries e ON e.id = et.entry_id
+           LEFT JOIN entry_tags et2 ON et2.tag_id = t.id
+           WHERE e.date = ?1
+           GROUP BY t.id"
+      )?;
+      let rows = stmt.query_map([date], |row| {
+          Ok(TagDto {
+              id: row.get(0)?,
+              name: row.get(1)?,
+              display_name: row.get(2)?,
+              usage_count: row.get(3)?,
+          })
+      })?;
+      rows.collect()
+  }
+  ```
+
+  Add commands in `commands.rs`:
+
+  ```rust
+  #[tauri::command]
+  pub fn add_tag_to_entry(app: AppHandle, date: String, tag_name: String) -> Result<(), String> {
+      let conn = get_conn(&app).map_err(|e| e.to_string())?;
+      crate::db::add_tag_to_entry(&conn, &date, &tag_name).map_err(|e| e.to_string())
+  }
+
+  #[tauri::command]
+  pub fn get_entry_tags(app: AppHandle, date: String) -> Result<Vec<TagDto>, String> {
+      let conn = get_conn(&app).map_err(|e| e.to_string())?;
+      crate::db::get_entry_tags(&conn, &date).map_err(|e| e.to_string())
+  }
+  ```
+
+- [ ] **Step 5: Add similar helpers for tasks**
 
   - `replace_task_tags(conn, task_id, tags)`
   - `get_all_tags(conn)` returning `Vec<TagDto>`
   - `search_entries_by_tag(conn, tag_name)`
   - `search_tasks_by_tag(conn, tag_name)`
 
-- [ ] **Step 5: Register commands in lib.rs**
+  Add `sync_task_tags` command:
+
+  ```rust
+  #[tauri::command]
+  pub fn sync_task_tags(app: AppHandle, task_id: i64, content: String) -> Result<(), String> {
+      let conn = get_conn(&app).map_err(|e| e.to_string())?;
+      let parsed = extract_tags(&content);
+      crate::db::replace_task_tags(&conn, task_id, &parsed.names).map_err(|e| e.to_string())
+  }
+  ```
+
+- [ ] **Step 6: Register commands in lib.rs**
 
   Add to `invoke_handler`:
 
@@ -355,19 +433,22 @@
   .invoke_handler(tauri::generate_handler![
       // existing commands...
       commands::sync_entry_tags,
+      commands::add_tag_to_entry,
+      commands::get_entry_tags,
+      commands::sync_task_tags,
       commands::get_all_tags,
       commands::search_by_tag,
   ])
   ```
 
-- [ ] **Step 6: Build and run dev mode**
+- [ ] **Step 7: Build and run dev mode**
 
   ```bash
   npm run tauri dev
   ```
   Expected: No compile errors.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
   ```bash
   git add src-tauri/src/commands.rs src-tauri/src/db.rs src-tauri/src/lib.rs
@@ -421,7 +502,7 @@
               .ok();
           conn.execute(
               "INSERT INTO entry_task_links (entry_id, task_id, raw_text, position) VALUES (?1, ?2, ?3, ?4)",
-              [entry_id, task_id.unwrap_or(0), link.raw_text.clone(), link.position as i64],
+              params![entry_id, task_id, link.raw_text.clone(), link.position as i64],
           )?;
       }
       Ok(())
@@ -565,11 +646,20 @@
     syncEntryTags: (date: string, content: string) =>
       safeInvoke<void>('sync_entry_tags', { date, content }),
 
+    addTagToEntry: (date: string, tagName: string) =>
+      safeInvoke<void>('add_tag_to_entry', { date, tagName }),
+
+    getEntryTags: (date: string) =>
+      safeInvoke<Tag[]>('get_entry_tags', { date }),
+
     getAllTags: () =>
       safeInvoke<Tag[]>('get_all_tags'),
 
     searchByTag: (tagName: string) =>
       safeInvoke<{ entries: Entry[]; tasks: Task[] }>('search_by_tag', { tagName }),
+
+    syncTaskTags: (taskId: number, content: string) =>
+      safeInvoke<void>('sync_task_tags', { taskId, content }),
 
     syncEntryTaskLinks: (date: string, content: string) =>
       safeInvoke<void>('sync_entry_task_links', { date, content }),
@@ -638,10 +728,12 @@
 
     const handleAdd = async () => {
       if (!newTag.trim()) return;
-      await api.syncEntryTags(date, `${content} #${newTag.trim()}`);
+      await api.addTagToEntry(date, newTag.trim());
       setNewTag('');
-      const tags = await api.getAllTags();
-      tags && setAllTags(tags);
+      const tags = await api.getEntryTags(date);
+      tags && setEntryTags(tags);
+      const all = await api.getAllTags();
+      all && setAllTags(all);
     };
 
     return (
