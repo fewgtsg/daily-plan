@@ -45,3 +45,13 @@ pub struct TagDto {
     pub display_name: Option<String>,
     pub usage_count: i64,
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TaskLinkDto {
+    pub id: i64,
+    pub entry_id: i64,
+    pub task_id: Option<i64>,
+    pub raw_text: String,
+    pub position: i64,
+    pub task_title: Option<String>,
+}

@@ -9,6 +9,8 @@ mod parser;
 mod parser_tests;
 #[cfg(test)]
 mod tag_tests;
+#[cfg(test)]
+mod task_link_tests;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -47,6 +49,8 @@ pub fn run() {
             commands::tags::get_task_tags,
             commands::tags::get_all_tags,
             commands::tags::search_by_tag,
+            commands::task_links::sync_entry_task_links,
+            commands::task_links::get_entry_task_links,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

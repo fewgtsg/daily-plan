@@ -1,8 +1,9 @@
-use rusqlite::{Connection, Result, Transaction};
+use rusqlite::{params, Connection, Result, Transaction};
 use std::fs;
 use tauri::Manager;
 
-use crate::models::TagDto;
+use crate::models::{TagDto, TaskLinkDto};
+use crate::parser::ParsedTaskLink;
 
 pub fn init_app_db(app_handle: &tauri::AppHandle) -> Result<Connection> {
     let app_dir = app_handle
@@ -402,6 +403,67 @@ pub fn backup_db(app_handle: &tauri::AppHandle) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+pub fn replace_entry_task_links(
+    conn: &Connection,
+    date: &str,
+    links: &[ParsedTaskLink],
+) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    let entry_id: i64 = match tx.query_row(
+        "SELECT id FROM entries WHERE date = ?1",
+        [date],
+        |row| row.get(0),
+    ) {
+        Ok(id) => id,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            tx.commit()?;
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
+    tx.execute(
+        "DELETE FROM entry_task_links WHERE entry_id = ?1",
+        [entry_id],
+    )?;
+    for link in links {
+        let task_id: Option<i64> = tx
+            .query_row(
+                "SELECT id FROM tasks WHERE title = ?1",
+                [link.raw_text.trim()],
+                |row| row.get(0),
+            )
+            .ok();
+        tx.execute(
+            "INSERT INTO entry_task_links (entry_id, task_id, raw_text, position) VALUES (?1, ?2, ?3, ?4)",
+            params![entry_id, task_id, link.raw_text.clone(), link.position as i64],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn get_entry_task_links(conn: &Connection, date: &str) -> Result<Vec<TaskLinkDto>> {
+    let mut stmt = conn.prepare(
+        "SELECT l.id, l.entry_id, l.task_id, l.raw_text, l.position, t.title
+         FROM entry_task_links l
+         LEFT JOIN tasks t ON t.id = l.task_id
+         JOIN entries e ON e.id = l.entry_id
+         WHERE e.date = ?1
+         ORDER BY l.position ASC"
+    )?;
+    let rows = stmt.query_map([date], |row| {
+        Ok(TaskLinkDto {
+            id: row.get(0)?,
+            entry_id: row.get(1)?,
+            task_id: row.get(2)?,
+            raw_text: row.get(3)?,
+            position: row.get(4)?,
+            task_title: row.get(5)?,
+        })
+    })?;
+    rows.collect()
 }
 
 #[cfg(test)]
