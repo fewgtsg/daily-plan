@@ -160,14 +160,7 @@ pub fn replace_entry_tags(
     date: &str,
     tags: &[crate::parser::ParsedTag],
 ) -> Result<()> {
-    let mut validated_tags = Vec::with_capacity(tags.len());
-    for tag in tags {
-        validated_tags.push(crate::parser::ParsedTag {
-            original: tag.original.clone(),
-            normalized: validate_tag_name(&tag.normalized)?,
-        });
-    }
-    let unique_tags = dedup_tags_preserve_order(&validated_tags);
+    let unique_tags = dedup_tags_preserve_order(tags);
 
     let tx = conn.unchecked_transaction()?;
     let entry_id: i64 =
@@ -183,7 +176,9 @@ pub fn replace_entry_tags(
         };
     tx.execute("DELETE FROM entry_tags WHERE entry_id = ?1", [entry_id])?;
     for (normalized, original) in &unique_tags {
-        let tag_id = ensure_tag(&tx, normalized.as_str(), original.as_str())?;
+        let normalized_lower = normalized.to_lowercase();
+        validate_tag_name(&normalized_lower)?;
+        let tag_id = ensure_tag(&tx, &normalized_lower, original.as_str())?;
         tx.execute(
             "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
             [entry_id, tag_id],
@@ -197,14 +192,7 @@ pub fn replace_task_tags(
     task_id: i64,
     tags: &[crate::parser::ParsedTag],
 ) -> Result<()> {
-    let mut validated_tags = Vec::with_capacity(tags.len());
-    for tag in tags {
-        validated_tags.push(crate::parser::ParsedTag {
-            original: tag.original.clone(),
-            normalized: validate_tag_name(&tag.normalized)?,
-        });
-    }
-    let unique_tags = dedup_tags_preserve_order(&validated_tags);
+    let unique_tags = dedup_tags_preserve_order(tags);
     let tx = conn.unchecked_transaction()?;
     let exists: bool = tx
         .query_row("SELECT 1 FROM tasks WHERE id = ?1", [task_id], |_| Ok(true))
@@ -215,7 +203,9 @@ pub fn replace_task_tags(
     }
     tx.execute("DELETE FROM task_tags WHERE task_id = ?1", [task_id])?;
     for (normalized, original) in &unique_tags {
-        let tag_id = ensure_tag(&tx, normalized.as_str(), original.as_str())?;
+        let normalized_lower = normalized.to_lowercase();
+        validate_tag_name(&normalized_lower)?;
+        let tag_id = ensure_tag(&tx, &normalized_lower, original.as_str())?;
         tx.execute(
             "INSERT OR IGNORE INTO task_tags (task_id, tag_id) VALUES (?1, ?2)",
             [task_id, tag_id],

@@ -205,4 +205,23 @@ mod tests {
         assert_eq!(tags[0].name, "work");
         assert_eq!(tags[0].display_name, Some("Work".to_string()));
     }
+
+    #[test]
+    fn replace_entry_tags_lowercases_non_lowercase_normalized() {
+        let conn = init_test_db().unwrap();
+        create_entry(&conn, "2024-01-14");
+        replace_entry_tags(
+            &conn,
+            "2024-01-14",
+            &[ParsedTag {
+                original: "Work".to_string(),
+                normalized: "Work".to_string(),
+            }],
+        )
+        .unwrap();
+        let tags = get_entry_tags(&conn, "2024-01-14").unwrap();
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].name, "work");
+        assert_eq!(tags[0].display_name, Some("Work".to_string()));
+    }
 }
