@@ -2,6 +2,8 @@ use rusqlite::{Connection, Result};
 use std::fs;
 use tauri::Manager;
 
+use crate::models::TagDto;
+
 pub fn init_app_db(app_handle: &tauri::AppHandle) -> Result<Connection> {
     let app_dir = app_handle.path().app_local_data_dir().expect("Failed to get app data dir");
     fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
@@ -123,6 +125,167 @@ fn create_v2_tables(conn: &Connection) -> Result<()> {
         );"
     )?;
     Ok(())
+}
+
+pub fn replace_entry_tags(conn: &Connection, date: &str, tags: &[String]) -> Result<()> {
+    // Deduplicate tags before processing
+    let unique_tags: Vec<String> = tags.iter().cloned().collect::<std::collections::HashSet<_>>().into_iter().collect();
+
+    let entry_id: i64 = conn.query_row(
+        "SELECT id FROM entries WHERE date = ?1",
+        [date],
+        |row| row.get(0),
+    )?;
+    conn.execute("DELETE FROM entry_tags WHERE entry_id = ?1", [entry_id])?;
+    for name in &unique_tags {
+        conn.execute(
+            "INSERT INTO tags (name, display_name, created_at) VALUES (?1, ?2, datetime('now'))
+             ON CONFLICT(name) DO UPDATE SET display_name = COALESCE(excluded.display_name, display_name)",
+            [name.as_str(), name.as_str()],
+        )?;
+        let tag_id: i64 = conn.query_row(
+            "SELECT id FROM tags WHERE name = ?1",
+            [name.as_str()],
+            |row| row.get(0),
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
+            [entry_id, tag_id],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn replace_task_tags(conn: &Connection, task_id: i64, tags: &[String]) -> Result<()> {
+    let unique_tags: Vec<String> = tags.iter().cloned().collect::<std::collections::HashSet<_>>().into_iter().collect();
+    conn.execute("DELETE FROM task_tags WHERE task_id = ?1", [task_id])?;
+    for name in &unique_tags {
+        conn.execute(
+            "INSERT INTO tags (name, display_name, created_at) VALUES (?1, ?2, datetime('now'))
+             ON CONFLICT(name) DO UPDATE SET display_name = COALESCE(excluded.display_name, display_name)",
+            [name.as_str(), name.as_str()],
+        )?;
+        let tag_id: i64 = conn.query_row(
+            "SELECT id FROM tags WHERE name = ?1",
+            [name.as_str()],
+            |row| row.get(0),
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO task_tags (task_id, tag_id) VALUES (?1, ?2)",
+            [task_id, tag_id],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn add_tag_to_entry(conn: &Connection, date: &str, tag_name: &str) -> Result<()> {
+    let entry_id: i64 = conn.query_row(
+        "SELECT id FROM entries WHERE date = ?1",
+        [date],
+        |row| row.get(0),
+    )?;
+    let normalized = tag_name.to_lowercase();
+    conn.execute(
+        "INSERT INTO tags (name, display_name, created_at) VALUES (?1, ?2, datetime('now'))
+         ON CONFLICT(name) DO UPDATE SET display_name = COALESCE(excluded.display_name, display_name)",
+        [&normalized, tag_name],
+    )?;
+    let tag_id: i64 = conn.query_row(
+        "SELECT id FROM tags WHERE name = ?1",
+        [&normalized],
+        |row| row.get(0),
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
+        [entry_id, tag_id],
+    )?;
+    Ok(())
+}
+
+pub fn get_entry_tags(conn: &Connection, date: &str) -> Result<Vec<TagDto>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.name, t.display_name, COUNT(et2.tag_id) as usage_count
+         FROM tags t
+         JOIN entry_tags et ON et.tag_id = t.id
+         JOIN entries e ON e.id = et.entry_id
+         LEFT JOIN entry_tags et2 ON et2.tag_id = t.id
+         WHERE e.date = ?1
+         GROUP BY t.id"
+    )?;
+    let rows = stmt.query_map([date], |row| {
+        Ok(TagDto {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            display_name: row.get(2)?,
+            usage_count: row.get(3)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn get_all_tags(conn: &Connection) -> Result<Vec<TagDto>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.name, t.display_name,
+                (SELECT COUNT(*) FROM entry_tags et WHERE et.tag_id = t.id) +
+                (SELECT COUNT(*) FROM task_tags tt WHERE tt.tag_id = t.id) AS usage_count
+         FROM tags t
+         ORDER BY usage_count DESC, t.name ASC"
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(TagDto {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            display_name: row.get(2)?,
+            usage_count: row.get(3)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn search_entries_by_tag(conn: &Connection, tag_name: &str) -> Result<Vec<crate::models::Entry>> {
+    // Query entries that have the given tag
+    let mut stmt = conn.prepare(
+        "SELECT e.id, e.date, e.content, e.created_at, e.updated_at
+         FROM entries e
+         JOIN entry_tags et ON et.entry_id = e.id
+         JOIN tags t ON t.id = et.tag_id
+         WHERE t.name = ?1
+         ORDER BY e.date DESC"
+    )?;
+    let rows = stmt.query_map([tag_name.to_lowercase()], |row| {
+        Ok(crate::models::Entry {
+            id: row.get(0)?,
+            date: row.get(1)?,
+            content: row.get(2)?,
+            created_at: row.get(3)?,
+            updated_at: row.get(4)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn search_tasks_by_tag(conn: &Connection, tag_name: &str) -> Result<Vec<crate::models::Task>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.title, t.description, t.quadrant, t.status, t.created_at, t.completed_at, t.updated_at
+         FROM tasks t
+         JOIN task_tags tt ON tt.task_id = t.id
+         JOIN tags tg ON tg.id = tt.tag_id
+         WHERE tg.name = ?1
+         ORDER BY t.updated_at DESC"
+    )?;
+    let rows = stmt.query_map([tag_name.to_lowercase()], |row| {
+        Ok(crate::models::Task {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            description: row.get(2)?,
+            quadrant: row.get(3)?,
+            status: row.get(4)?,
+            created_at: row.get(5)?,
+            completed_at: row.get(6)?,
+            updated_at: row.get(7)?,
+        })
+    })?;
+    rows.collect()
 }
 
 pub fn backup_db(app_handle: &tauri::AppHandle) -> std::io::Result<()> {

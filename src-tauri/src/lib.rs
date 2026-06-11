@@ -38,6 +38,12 @@ pub fn run() {
             commands::tasks::move_task_quadrant,
             commands::search::search,
             commands::system::export_all_data,
+            commands::tags::sync_entry_tags,
+            commands::tags::add_tag_to_entry,
+            commands::tags::get_entry_tags,
+            commands::tags::sync_task_tags,
+            commands::tags::get_all_tags,
+            commands::tags::search_by_tag,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

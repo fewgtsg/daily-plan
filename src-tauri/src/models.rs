@@ -36,3 +36,11 @@ pub struct SearchResult {
     pub date: Option<String>,
     pub content: String,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TagDto {
+    pub id: i64,
+    pub name: String,
+    pub display_name: Option<String>,
+    pub usage_count: i64,
+}
