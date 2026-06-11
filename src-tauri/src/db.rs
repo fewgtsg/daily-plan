@@ -127,13 +127,13 @@ fn create_v2_tables(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn dedup_tags_preserve_order(tags: &[String]) -> Vec<String> {
+fn dedup_tags_preserve_order(tags: &[String]) -> Vec<(String, String)> {
     let mut seen = std::collections::HashSet::new();
     let mut result = Vec::new();
     for tag in tags {
         let normalized = tag.to_lowercase();
         if seen.insert(normalized.clone()) {
-            result.push(normalized);
+            result.push((normalized, tag.clone()));
         }
     }
     result
@@ -175,8 +175,8 @@ pub fn replace_entry_tags(conn: &Connection, date: &str, tags: &[String]) -> Res
         Err(e) => return Err(e),
     };
     tx.execute("DELETE FROM entry_tags WHERE entry_id = ?1", [entry_id])?;
-    for name in &unique_tags {
-        let tag_id = ensure_tag(&tx, name.as_str(), name.as_str())?;
+    for (name, display_name) in &unique_tags {
+        let tag_id = ensure_tag(&tx, name.as_str(), display_name.as_str())?;
         tx.execute(
             "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
             [entry_id, tag_id],
@@ -192,9 +192,16 @@ pub fn replace_task_tags(conn: &Connection, task_id: i64, tags: &[String]) -> Re
     }
     let unique_tags = dedup_tags_preserve_order(&validated_tags);
     let tx = conn.unchecked_transaction()?;
+    let exists: bool = tx
+        .query_row("SELECT 1 FROM tasks WHERE id = ?1", [task_id], |_| Ok(true))
+        .unwrap_or(false);
+    if !exists {
+        tx.commit()?;
+        return Ok(());
+    }
     tx.execute("DELETE FROM task_tags WHERE task_id = ?1", [task_id])?;
-    for name in &unique_tags {
-        let tag_id = ensure_tag(&tx, name.as_str(), name.as_str())?;
+    for (name, display_name) in &unique_tags {
+        let tag_id = ensure_tag(&tx, name.as_str(), display_name.as_str())?;
         tx.execute(
             "INSERT OR IGNORE INTO task_tags (task_id, tag_id) VALUES (?1, ?2)",
             [task_id, tag_id],

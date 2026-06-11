@@ -41,31 +41,51 @@ mod tests {
     }
 
     #[test]
-    fn replace_entry_tags_deduplicates_and_preserves_order() {
+    fn replace_entry_tags_deduplicates_tags() {
         let conn = init_test_db().unwrap();
         create_entry(&conn, "2024-01-02");
         replace_entry_tags(
             &conn,
             "2024-01-02",
             &vec![
-                "alpha".to_string(),
                 "beta".to_string(),
                 "alpha".to_string(),
+                "beta".to_string(),
                 "gamma".to_string(),
             ],
         )
         .unwrap();
         let tags = get_entry_tags(&conn, "2024-01-02").unwrap();
-        assert_eq!(tags.len(), 3);
-        assert_eq!(tags[0].name, "alpha");
-        assert_eq!(tags[1].name, "beta");
-        assert_eq!(tags[2].name, "gamma");
+        let names: Vec<String> = tags.iter().map(|t| t.name.clone()).collect();
+        assert_eq!(names, vec!["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn get_entry_tags_returns_sorted_by_name() {
+        let conn = init_test_db().unwrap();
+        create_entry(&conn, "2024-01-12");
+        replace_entry_tags(
+            &conn,
+            "2024-01-12",
+            &vec!["zebra".to_string(), "apple".to_string(), "mango".to_string()],
+        )
+        .unwrap();
+        let tags = get_entry_tags(&conn, "2024-01-12").unwrap();
+        let names: Vec<String> = tags.iter().map(|t| t.name.clone()).collect();
+        assert_eq!(names, vec!["apple", "mango", "zebra"]);
     }
 
     #[test]
     fn replace_entry_tags_handles_missing_entry() {
         let conn = init_test_db().unwrap();
         let result = replace_entry_tags(&conn, "2024-01-03", &vec!["work".to_string()]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn replace_task_tags_handles_missing_task() {
+        let conn = init_test_db().unwrap();
+        let result = replace_task_tags(&conn, 999, &vec!["work".to_string()]);
         assert!(result.is_ok());
     }
 
