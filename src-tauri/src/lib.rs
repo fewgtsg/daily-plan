@@ -8,6 +8,8 @@ mod parser;
 #[cfg(test)]
 mod parser_tests;
 #[cfg(test)]
+mod settings_tests;
+#[cfg(test)]
 mod tag_tests;
 #[cfg(test)]
 mod task_link_tests;
@@ -41,6 +43,8 @@ pub fn run() {
             commands::tasks::remove_task,
             commands::tasks::move_task_quadrant,
             commands::search::search,
+            commands::settings::get_app_setting,
+            commands::settings::set_app_setting,
             commands::system::export_all_data,
             commands::tags::sync_entry_tags,
             commands::tags::add_tag_to_entry,
