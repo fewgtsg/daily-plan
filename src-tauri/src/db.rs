@@ -132,8 +132,8 @@ fn dedup_tags_preserve_order(tags: &[String]) -> Vec<String> {
     let mut result = Vec::new();
     for tag in tags {
         let normalized = tag.to_lowercase();
-        if seen.insert(normalized) {
-            result.push(tag.clone());
+        if seen.insert(normalized.clone()) {
+            result.push(normalized);
         }
     }
     result
@@ -192,26 +192,27 @@ pub fn replace_task_tags(conn: &Connection, task_id: i64, tags: &[String]) -> Re
     tx.commit()
 }
 
+fn validation_error(msg: &str) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        msg.to_string(),
+    )))
+}
+
 fn validate_tag_name(tag_name: &str) -> Result<String> {
     let trimmed = tag_name.trim();
     if trimmed.is_empty() {
-        return Err(rusqlite::Error::InvalidParameterName(
-            "Tag name cannot be empty".to_string(),
-        ));
+        return Err(validation_error("Tag name cannot be empty"));
     }
     if trimmed.chars().count() > 50 {
-        return Err(rusqlite::Error::InvalidParameterName(
-            "Tag name must be 50 characters or fewer".to_string(),
-        ));
+        return Err(validation_error("Tag name must be 50 characters or fewer"));
     }
     if trimmed.chars().all(|c| c.is_ascii_digit()) {
-        return Err(rusqlite::Error::InvalidParameterName(
-            "Tag name cannot be purely numeric".to_string(),
-        ));
+        return Err(validation_error("Tag name cannot be purely numeric"));
     }
     if !trimmed.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
-        return Err(rusqlite::Error::InvalidParameterName(
-            "Tag name can only contain letters, numbers, underscores, and hyphens".to_string(),
+        return Err(validation_error(
+            "Tag name can only contain letters, numbers, underscores, and hyphens",
         ));
     }
     Ok(trimmed.to_string())
@@ -245,7 +246,8 @@ pub fn get_entry_tags(conn: &Connection, date: &str) -> Result<Vec<TagDto>> {
          JOIN entry_tags et ON et.tag_id = t.id
          JOIN entries e ON e.id = et.entry_id
          WHERE e.date = ?1
-         GROUP BY t.id"
+         GROUP BY t.id
+         ORDER BY t.name ASC"
     )?;
     let rows = stmt.query_map([date], |row| {
         Ok(TagDto {
