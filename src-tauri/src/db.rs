@@ -7,7 +7,9 @@ pub fn init_app_db(app_handle: &tauri::AppHandle) -> Result<Connection> {
     fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
     let db_path = app_dir.join("app.db");
     let conn = Connection::open(db_path)?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     create_tables(&conn)?;
+    create_v2_tables(&conn)?;
     Ok(conn)
 }
 
@@ -73,6 +75,58 @@ fn create_tables(conn: &Connection) -> Result<()> {
             INSERT INTO tasks_fts(tasks_fts, rowid, title, description) VALUES ('delete', old.id, old.title, old.description);
             INSERT INTO tasks_fts(rowid, title, description) VALUES (new.id, new.title, new.description);
         END;"
+    )?;
+    Ok(())
+}
+
+fn create_v2_tables(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            display_name TEXT,
+            created_at TEXT NOT NULL
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS entry_tags (
+            entry_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            PRIMARY KEY (entry_id, tag_id),
+            FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS task_tags (
+            task_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            PRIMARY KEY (task_id, tag_id),
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS entry_task_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_id INTEGER NOT NULL,
+            task_id INTEGER,
+            raw_text TEXT NOT NULL,
+            position INTEGER,
+            FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )",
+        [],
     )?;
     Ok(())
 }
