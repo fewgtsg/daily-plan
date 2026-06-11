@@ -25,7 +25,7 @@ pub fn extract_tags(text: &str) -> ParsedTags {
     let mut names = Vec::new();
     for cap in tag_regex().captures_iter(text) {
         let name = cap[1].to_lowercase();
-        if !name.chars().all(|c| c.is_ascii_digit()) && name.len() <= 50 {
+        if !name.chars().all(|c| c.is_ascii_digit()) && name.chars().count() <= 50 {
             names.push(name);
         }
     }

@@ -34,6 +34,20 @@ mod tests {
     }
 
     #[test]
+    fn accepts_fifty_unicode_chars() {
+        let tag = "工".repeat(50);
+        let result = extract_tags(&format!("#{}", tag));
+        assert_eq!(result.names.len(), 1);
+    }
+
+    #[test]
+    fn rejects_fifty_one_unicode_chars() {
+        let tag = "工".repeat(51);
+        let result = extract_tags(&format!("#{}", tag));
+        assert!(result.names.is_empty());
+    }
+
+    #[test]
     fn preserves_duplicate_tags() {
         let result = extract_tags("#工作 #工作 #学习");
         assert_eq!(result.names, vec!["工作", "工作", "学习"]);
