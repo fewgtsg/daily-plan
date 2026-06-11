@@ -1,4 +1,4 @@
-use rusqlite::{Connection, OptionalExtension, Result, Transaction};
+use rusqlite::{Connection, Result, Transaction};
 use std::fs;
 use tauri::Manager;
 
@@ -140,6 +140,7 @@ fn dedup_tags_preserve_order(tags: &[String]) -> Vec<String> {
 }
 
 fn ensure_tag(tx: &Transaction, name: &str, display_name: &str) -> Result<i64> {
+    let _ = validate_tag_name(name)?;
     tx.execute(
         "INSERT INTO tags (name, display_name, created_at) VALUES (?1, ?2, datetime('now'))
          ON CONFLICT(name) DO UPDATE SET display_name = COALESCE(tags.display_name, excluded.display_name)",
@@ -154,19 +155,25 @@ fn ensure_tag(tx: &Transaction, name: &str, display_name: &str) -> Result<i64> {
 }
 
 pub fn replace_entry_tags(conn: &Connection, date: &str, tags: &[String]) -> Result<()> {
-    let unique_tags = dedup_tags_preserve_order(tags);
+    let mut validated_tags = Vec::with_capacity(tags.len());
+    for tag in tags {
+        validated_tags.push(validate_tag_name(tag)?);
+    }
+    let unique_tags = dedup_tags_preserve_order(&validated_tags);
 
-    let entry_id: Option<i64> = conn.query_row(
+    let tx = conn.unchecked_transaction()?;
+    let entry_id: i64 = match tx.query_row(
         "SELECT id FROM entries WHERE date = ?1",
         [date],
         |row| row.get(0),
-    ).optional()?;
-    let entry_id = match entry_id {
-        Some(id) => id,
-        None => return Ok(()),
+    ) {
+        Ok(id) => id,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            tx.commit()?;
+            return Ok(());
+        }
+        Err(e) => return Err(e),
     };
-
-    let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM entry_tags WHERE entry_id = ?1", [entry_id])?;
     for name in &unique_tags {
         let tag_id = ensure_tag(&tx, name.as_str(), name.as_str())?;
@@ -179,7 +186,11 @@ pub fn replace_entry_tags(conn: &Connection, date: &str, tags: &[String]) -> Res
 }
 
 pub fn replace_task_tags(conn: &Connection, task_id: i64, tags: &[String]) -> Result<()> {
-    let unique_tags = dedup_tags_preserve_order(tags);
+    let mut validated_tags = Vec::with_capacity(tags.len());
+    for tag in tags {
+        validated_tags.push(validate_tag_name(tag)?);
+    }
+    let unique_tags = dedup_tags_preserve_order(&validated_tags);
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM task_tags WHERE task_id = ?1", [task_id])?;
     for name in &unique_tags {
@@ -222,13 +233,19 @@ pub fn add_tag_to_entry(conn: &Connection, date: &str, tag_name: &str) -> Result
     let trimmed = validate_tag_name(tag_name)?;
     let normalized = trimmed.to_lowercase();
 
-    let entry_id: i64 = conn.query_row(
+    let tx = conn.unchecked_transaction()?;
+    let entry_id: i64 = match tx.query_row(
         "SELECT id FROM entries WHERE date = ?1",
         [date],
         |row| row.get(0),
-    )?;
-
-    let tx = conn.unchecked_transaction()?;
+    ) {
+        Ok(id) => id,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            tx.commit()?;
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
     let tag_id = ensure_tag(&tx, &normalized, &trimmed)?;
     tx.execute(
         "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
@@ -301,6 +318,7 @@ pub fn get_all_tags(conn: &Connection) -> Result<Vec<TagDto>> {
 }
 
 pub fn search_entries_by_tag(conn: &Connection, tag_name: &str) -> Result<Vec<crate::models::Entry>> {
+    let trimmed = validate_tag_name(tag_name)?;
     // Query entries that have the given tag
     let mut stmt = conn.prepare(
         "SELECT e.id, e.date, e.content, e.created_at, e.updated_at
@@ -310,7 +328,7 @@ pub fn search_entries_by_tag(conn: &Connection, tag_name: &str) -> Result<Vec<cr
          WHERE t.name = ?1
          ORDER BY e.date DESC"
     )?;
-    let rows = stmt.query_map([tag_name.to_lowercase()], |row| {
+    let rows = stmt.query_map([trimmed.to_lowercase()], |row| {
         Ok(crate::models::Entry {
             id: row.get(0)?,
             date: row.get(1)?,
@@ -323,6 +341,7 @@ pub fn search_entries_by_tag(conn: &Connection, tag_name: &str) -> Result<Vec<cr
 }
 
 pub fn search_tasks_by_tag(conn: &Connection, tag_name: &str) -> Result<Vec<crate::models::Task>> {
+    let trimmed = validate_tag_name(tag_name)?;
     let mut stmt = conn.prepare(
         "SELECT t.id, t.title, t.description, t.quadrant, t.status, t.created_at, t.completed_at, t.updated_at
          FROM tasks t
@@ -331,7 +350,7 @@ pub fn search_tasks_by_tag(conn: &Connection, tag_name: &str) -> Result<Vec<crat
          WHERE tg.name = ?1
          ORDER BY t.updated_at DESC"
     )?;
-    let rows = stmt.query_map([tag_name.to_lowercase()], |row| {
+    let rows = stmt.query_map([trimmed.to_lowercase()], |row| {
         Ok(crate::models::Task {
             id: row.get(0)?,
             title: row.get(1)?,

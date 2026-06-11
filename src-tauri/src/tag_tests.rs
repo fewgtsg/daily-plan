@@ -148,6 +148,19 @@ mod tests {
     }
 
     #[test]
+    fn replace_entry_tags_rejects_invalid_tags() {
+        let conn = init_test_db().unwrap();
+        create_entry(&conn, "2024-01-11");
+        assert!(replace_entry_tags(&conn, "2024-01-11", &vec!["".to_string()]).is_err());
+        assert!(replace_entry_tags(&conn, "2024-01-11", &vec!["   ".to_string()]).is_err());
+        assert!(replace_entry_tags(&conn, "2024-01-11", &vec!["a".repeat(51)]).is_err());
+        assert!(replace_entry_tags(&conn, "2024-01-11", &vec!["123".to_string()]).is_err());
+        assert!(replace_entry_tags(&conn, "2024-01-11", &vec!["hello world".to_string()]).is_err());
+        assert!(replace_entry_tags(&conn, "2024-01-11", &vec!["hello!".to_string()]).is_err());
+        assert!(replace_entry_tags(&conn, "2024-01-11", &vec!["ok-tag_1".to_string()]).is_ok());
+    }
+
+    #[test]
     fn add_tag_to_entry_trims_whitespace() {
         let conn = init_test_db().unwrap();
         create_entry(&conn, "2024-01-10");
