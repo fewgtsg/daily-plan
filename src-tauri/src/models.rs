@@ -31,6 +31,7 @@ pub struct SearchResult {
 
 /// usage_count is the total number of entries and tasks using this tag globally.
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct TagDto {
     pub id: i64,
     pub name: String,
@@ -39,6 +40,7 @@ pub struct TagDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskLinkDto {
     pub id: i64,
     pub entry_id: i64,

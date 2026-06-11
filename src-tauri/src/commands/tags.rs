@@ -63,6 +63,7 @@ pub fn get_all_tags(state: State<'_, Mutex<Connection>>) -> Result<Vec<TagDto>, 
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TagSearchResult {
     pub entries: Vec<crate::models::Entry>,
     pub tasks: Vec<crate::models::Task>,

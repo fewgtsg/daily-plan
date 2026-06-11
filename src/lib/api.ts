@@ -39,21 +39,21 @@ export const api = {
     safeInvoke("sync_entry_tags", { date, content }),
 
   addTagToEntry: (date: string, tagName: string): Promise<null> =>
-    safeInvoke("add_tag_to_entry", { date, tagName }),
+    safeInvoke("add_tag_to_entry", { date, tag_name: tagName }),
 
   getEntryTags: (date: string): Promise<Tag[] | null> =>
     safeInvoke("get_entry_tags", { date }),
 
   getTaskTags: (taskId: number): Promise<Tag[] | null> =>
-    safeInvoke("get_task_tags", { taskId }),
+    safeInvoke("get_task_tags", { task_id: taskId }),
 
   getAllTags: (): Promise<Tag[] | null> => safeInvoke("get_all_tags"),
 
   searchByTag: (tagName: string): Promise<TagSearchResult | null> =>
-    safeInvoke("search_by_tag", { tagName }),
+    safeInvoke("search_by_tag", { tag_name: tagName }),
 
   syncTaskTags: (taskId: number, content: string): Promise<null> =>
-    safeInvoke("sync_task_tags", { taskId, content }),
+    safeInvoke("sync_task_tags", { task_id: taskId, content }),
 
   syncEntryTaskLinks: (date: string, content: string): Promise<null> =>
     safeInvoke("sync_entry_task_links", { date, content }),
