@@ -80,37 +80,31 @@ fn create_tables(conn: &Connection) -> Result<()> {
 }
 
 fn create_v2_tables(conn: &Connection) -> Result<()> {
-    conn.execute(
+    conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
             display_name TEXT,
             created_at TEXT NOT NULL
-        )",
-        [],
-    )?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS entry_tags (
+        );
+
+        CREATE TABLE IF NOT EXISTS entry_tags (
             entry_id INTEGER NOT NULL,
             tag_id INTEGER NOT NULL,
             PRIMARY KEY (entry_id, tag_id),
             FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
             FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
-        )",
-        [],
-    )?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS task_tags (
+        );
+
+        CREATE TABLE IF NOT EXISTS task_tags (
             task_id INTEGER NOT NULL,
             tag_id INTEGER NOT NULL,
             PRIMARY KEY (task_id, tag_id),
             FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
             FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
-        )",
-        [],
-    )?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS entry_task_links (
+        );
+
+        CREATE TABLE IF NOT EXISTS entry_task_links (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             entry_id INTEGER NOT NULL,
             task_id INTEGER,
@@ -118,15 +112,15 @@ fn create_v2_tables(conn: &Connection) -> Result<()> {
             position INTEGER,
             FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
             FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
-        )",
-        [],
-    )?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS app_settings (
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_entry_task_links_entry_id ON entry_task_links(entry_id);
+        CREATE INDEX IF NOT EXISTS idx_entry_task_links_task_id ON entry_task_links(task_id);
+
+        CREATE TABLE IF NOT EXISTS app_settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
-        )",
-        [],
+        );"
     )?;
     Ok(())
 }
