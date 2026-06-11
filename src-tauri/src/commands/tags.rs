@@ -1,38 +1,56 @@
-use serde::Serialize;
-use tauri::State;
-use std::sync::Mutex;
 use rusqlite::Connection;
+use serde::Serialize;
+use std::sync::Mutex;
+use tauri::State;
 
 use crate::models::TagDto;
 use crate::parser::extract_tags;
 
 #[tauri::command]
-pub fn sync_entry_tags(state: State<'_, Mutex<Connection>>, date: String, content: String) -> Result<(), String> {
+pub fn sync_entry_tags(
+    state: State<'_, Mutex<Connection>>,
+    date: String,
+    content: String,
+) -> Result<(), String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     let parsed = extract_tags(&content);
     crate::db::replace_entry_tags(&conn, &date, &parsed.tags).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn add_tag_to_entry(state: State<'_, Mutex<Connection>>, date: String, tag_name: String) -> Result<(), String> {
+pub fn add_tag_to_entry(
+    state: State<'_, Mutex<Connection>>,
+    date: String,
+    tag_name: String,
+) -> Result<(), String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     crate::db::add_tag_to_entry(&conn, &date, tag_name.trim()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn get_entry_tags(state: State<'_, Mutex<Connection>>, date: String) -> Result<Vec<TagDto>, String> {
+pub fn get_entry_tags(
+    state: State<'_, Mutex<Connection>>,
+    date: String,
+) -> Result<Vec<TagDto>, String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     crate::db::get_entry_tags(&conn, &date).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn get_task_tags(state: State<'_, Mutex<Connection>>, task_id: i64) -> Result<Vec<TagDto>, String> {
+pub fn get_task_tags(
+    state: State<'_, Mutex<Connection>>,
+    task_id: i64,
+) -> Result<Vec<TagDto>, String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     crate::db::get_task_tags(&conn, task_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn sync_task_tags(state: State<'_, Mutex<Connection>>, task_id: i64, content: String) -> Result<(), String> {
+pub fn sync_task_tags(
+    state: State<'_, Mutex<Connection>>,
+    task_id: i64,
+    content: String,
+) -> Result<(), String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     let parsed = extract_tags(&content);
     crate::db::replace_task_tags(&conn, task_id, &parsed.tags).map_err(|e| e.to_string())
@@ -51,7 +69,10 @@ pub struct TagSearchResult {
 }
 
 #[tauri::command]
-pub fn search_by_tag(state: State<'_, Mutex<Connection>>, tag_name: String) -> Result<TagSearchResult, String> {
+pub fn search_by_tag(
+    state: State<'_, Mutex<Connection>>,
+    tag_name: String,
+) -> Result<TagSearchResult, String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     let trimmed = tag_name.trim();
     let entries = crate::db::search_entries_by_tag(&conn, trimmed).map_err(|e| e.to_string())?;

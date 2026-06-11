@@ -50,12 +50,7 @@ mod tests {
         replace_entry_tags(
             &conn,
             "2024-01-02",
-            &[
-                tag("beta"),
-                tag("alpha"),
-                tag("beta"),
-                tag("gamma"),
-            ],
+            &[tag("beta"), tag("alpha"), tag("beta"), tag("gamma")],
         )
         .unwrap();
         let tags = get_entry_tags(&conn, "2024-01-02").unwrap();

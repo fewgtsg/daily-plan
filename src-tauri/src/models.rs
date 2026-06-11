@@ -37,6 +37,7 @@ pub struct SearchResult {
     pub content: String,
 }
 
+/// usage_count is the total number of entries and tasks using this tag globally.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TagDto {
     pub id: i64,

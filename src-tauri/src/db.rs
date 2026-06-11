@@ -5,7 +5,10 @@ use tauri::Manager;
 use crate::models::TagDto;
 
 pub fn init_app_db(app_handle: &tauri::AppHandle) -> Result<Connection> {
-    let app_dir = app_handle.path().app_local_data_dir().expect("Failed to get app data dir");
+    let app_dir = app_handle
+        .path()
+        .app_local_data_dir()
+        .expect("Failed to get app data dir");
     fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
     let db_path = app_dir.join("app.db");
     let conn = Connection::open(db_path)?;
@@ -122,7 +125,7 @@ fn create_v2_tables(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS app_settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
-        );"
+        );",
     )?;
     Ok(())
 }
@@ -138,6 +141,7 @@ fn dedup_tags_preserve_order(tags: &[crate::parser::ParsedTag]) -> Vec<(String, 
     result
 }
 
+/// Upserts a tag. The display_name is set only on first insert; existing display_name is preserved.
 fn ensure_tag(tx: &Transaction, name: &str, display_name: &str) -> Result<i64> {
     let _ = validate_tag_name(name)?;
     tx.execute(
@@ -145,15 +149,17 @@ fn ensure_tag(tx: &Transaction, name: &str, display_name: &str) -> Result<i64> {
          ON CONFLICT(name) DO UPDATE SET display_name = COALESCE(tags.display_name, excluded.display_name)",
         [name, display_name],
     )?;
-    let tag_id: i64 = tx.query_row(
-        "SELECT id FROM tags WHERE name = ?1",
-        [name],
-        |row| row.get(0),
-    )?;
+    let tag_id: i64 = tx.query_row("SELECT id FROM tags WHERE name = ?1", [name], |row| {
+        row.get(0)
+    })?;
     Ok(tag_id)
 }
 
-pub fn replace_entry_tags(conn: &Connection, date: &str, tags: &[crate::parser::ParsedTag]) -> Result<()> {
+pub fn replace_entry_tags(
+    conn: &Connection,
+    date: &str,
+    tags: &[crate::parser::ParsedTag],
+) -> Result<()> {
     let mut validated_tags = Vec::with_capacity(tags.len());
     for tag in tags {
         validated_tags.push(crate::parser::ParsedTag {
@@ -164,18 +170,17 @@ pub fn replace_entry_tags(conn: &Connection, date: &str, tags: &[crate::parser::
     let unique_tags = dedup_tags_preserve_order(&validated_tags);
 
     let tx = conn.unchecked_transaction()?;
-    let entry_id: i64 = match tx.query_row(
-        "SELECT id FROM entries WHERE date = ?1",
-        [date],
-        |row| row.get(0),
-    ) {
-        Ok(id) => id,
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            tx.commit()?;
-            return Ok(());
-        }
-        Err(e) => return Err(e),
-    };
+    let entry_id: i64 =
+        match tx.query_row("SELECT id FROM entries WHERE date = ?1", [date], |row| {
+            row.get(0)
+        }) {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                tx.commit()?;
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
     tx.execute("DELETE FROM entry_tags WHERE entry_id = ?1", [entry_id])?;
     for (normalized, original) in &unique_tags {
         let tag_id = ensure_tag(&tx, normalized.as_str(), original.as_str())?;
@@ -187,7 +192,11 @@ pub fn replace_entry_tags(conn: &Connection, date: &str, tags: &[crate::parser::
     tx.commit()
 }
 
-pub fn replace_task_tags(conn: &Connection, task_id: i64, tags: &[crate::parser::ParsedTag]) -> Result<()> {
+pub fn replace_task_tags(
+    conn: &Connection,
+    task_id: i64,
+    tags: &[crate::parser::ParsedTag],
+) -> Result<()> {
     let mut validated_tags = Vec::with_capacity(tags.len());
     for tag in tags {
         validated_tags.push(crate::parser::ParsedTag {
@@ -233,7 +242,10 @@ fn validate_tag_name(tag_name: &str) -> Result<String> {
     if trimmed.chars().all(|c| c.is_ascii_digit()) {
         return Err(validation_error("Tag name cannot be purely numeric"));
     }
-    if !trimmed.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+    if !trimmed
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    {
         return Err(validation_error(
             "Tag name can only contain letters, numbers, underscores, and hyphens",
         ));
@@ -246,18 +258,17 @@ pub fn add_tag_to_entry(conn: &Connection, date: &str, tag_name: &str) -> Result
     let normalized = trimmed.to_lowercase();
 
     let tx = conn.unchecked_transaction()?;
-    let entry_id: i64 = match tx.query_row(
-        "SELECT id FROM entries WHERE date = ?1",
-        [date],
-        |row| row.get(0),
-    ) {
-        Ok(id) => id,
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            tx.commit()?;
-            return Ok(());
-        }
-        Err(e) => return Err(e),
-    };
+    let entry_id: i64 =
+        match tx.query_row("SELECT id FROM entries WHERE date = ?1", [date], |row| {
+            row.get(0)
+        }) {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                tx.commit()?;
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
     let tag_id = ensure_tag(&tx, &normalized, &trimmed)?;
     tx.execute(
         "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
@@ -276,7 +287,7 @@ pub fn get_entry_tags(conn: &Connection, date: &str) -> Result<Vec<TagDto>> {
          JOIN entries e ON e.id = et.entry_id
          WHERE e.date = ?1
          GROUP BY t.id
-         ORDER BY t.name ASC"
+         ORDER BY t.name ASC",
     )?;
     let rows = stmt.query_map([date], |row| {
         Ok(TagDto {
@@ -297,7 +308,7 @@ pub fn get_task_tags(conn: &Connection, task_id: i64) -> Result<Vec<TagDto>> {
          FROM tags t
          JOIN task_tags tt ON tt.tag_id = t.id
          WHERE tt.task_id = ?1
-         ORDER BY t.name ASC"
+         ORDER BY t.name ASC",
     )?;
     let rows = stmt.query_map([task_id], |row| {
         Ok(TagDto {
@@ -316,7 +327,7 @@ pub fn get_all_tags(conn: &Connection) -> Result<Vec<TagDto>> {
                 (SELECT COUNT(*) FROM entry_tags et WHERE et.tag_id = t.id) +
                 (SELECT COUNT(*) FROM task_tags tt WHERE tt.tag_id = t.id) AS usage_count
          FROM tags t
-         ORDER BY usage_count DESC, t.name ASC"
+         ORDER BY usage_count DESC, t.name ASC",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(TagDto {
@@ -329,7 +340,10 @@ pub fn get_all_tags(conn: &Connection) -> Result<Vec<TagDto>> {
     rows.collect()
 }
 
-pub fn search_entries_by_tag(conn: &Connection, tag_name: &str) -> Result<Vec<crate::models::Entry>> {
+pub fn search_entries_by_tag(
+    conn: &Connection,
+    tag_name: &str,
+) -> Result<Vec<crate::models::Entry>> {
     let trimmed = validate_tag_name(tag_name)?;
     // Query entries that have the given tag
     let mut stmt = conn.prepare(
@@ -338,7 +352,7 @@ pub fn search_entries_by_tag(conn: &Connection, tag_name: &str) -> Result<Vec<cr
          JOIN entry_tags et ON et.entry_id = e.id
          JOIN tags t ON t.id = et.tag_id
          WHERE t.name = ?1
-         ORDER BY e.date DESC"
+         ORDER BY e.date DESC",
     )?;
     let rows = stmt.query_map([trimmed.to_lowercase()], |row| {
         Ok(crate::models::Entry {
@@ -378,7 +392,10 @@ pub fn search_tasks_by_tag(conn: &Connection, tag_name: &str) -> Result<Vec<crat
 }
 
 pub fn backup_db(app_handle: &tauri::AppHandle) -> std::io::Result<()> {
-    let app_dir = app_handle.path().app_local_data_dir().expect("Failed to get app data dir");
+    let app_dir = app_handle
+        .path()
+        .app_local_data_dir()
+        .expect("Failed to get app data dir");
     let db_path = app_dir.join("app.db");
     let backup_dir = app_dir.join("backups");
     std::fs::create_dir_all(&backup_dir)?;

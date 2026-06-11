@@ -1,8 +1,9 @@
-use rusqlite::{params, Connection, Result};
 use crate::models::Entry;
+use rusqlite::{params, Connection, Result};
 
 pub fn get_entry_by_date(conn: &Connection, date: &str) -> Result<Option<Entry>> {
-    let mut stmt = conn.prepare("SELECT id, date, content, created_at, updated_at FROM entries WHERE date = ?1")?;
+    let mut stmt = conn
+        .prepare("SELECT id, date, content, created_at, updated_at FROM entries WHERE date = ?1")?;
     let mut rows = stmt.query_map([date], |row| {
         Ok(Entry {
             id: row.get(0)?,
@@ -48,21 +49,30 @@ pub fn create_or_update_entry(conn: &Connection, date: &str, content: &str) -> R
 
 pub fn list_entry_dates(conn: &Connection) -> Result<Vec<String>> {
     let mut stmt = conn.prepare("SELECT date FROM entries ORDER BY date DESC")?;
-    let dates = stmt.query_map([], |row| row.get(0))?.collect::<Result<Vec<_>>>()?;
+    let dates = stmt
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<Vec<_>>>()?;
     Ok(dates)
 }
 
-use tauri::State;
 use std::sync::Mutex;
+use tauri::State;
 
 #[tauri::command]
-pub fn get_entry(state: State<'_, Mutex<Connection>>, date: String) -> Result<Option<Entry>, String> {
+pub fn get_entry(
+    state: State<'_, Mutex<Connection>>,
+    date: String,
+) -> Result<Option<Entry>, String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     get_entry_by_date(&conn, &date).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn save_entry(state: State<'_, Mutex<Connection>>, date: String, content: String) -> Result<Entry, String> {
+pub fn save_entry(
+    state: State<'_, Mutex<Connection>>,
+    date: String,
+    content: String,
+) -> Result<Entry, String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     create_or_update_entry(&conn, &date, &content).map_err(|e| e.to_string())
 }

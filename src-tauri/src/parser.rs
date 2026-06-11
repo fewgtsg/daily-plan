@@ -31,10 +31,11 @@ pub fn extract_tags(text: &str) -> ParsedTags {
     for cap in tag_regex().captures_iter(text) {
         let original = cap[1].to_string();
         let normalized = original.to_lowercase();
-        if !normalized.chars().all(|c| c.is_ascii_digit())
-            && normalized.chars().count() <= 50
-        {
-            tags.push(ParsedTag { original, normalized });
+        if !normalized.chars().all(|c| c.is_ascii_digit()) && normalized.chars().count() <= 50 {
+            tags.push(ParsedTag {
+                original,
+                normalized,
+            });
         }
     }
     ParsedTags { tags }
