@@ -411,18 +411,17 @@ pub fn replace_entry_task_links(
     links: &[ParsedTaskLink],
 ) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
-    let entry_id: i64 = match tx.query_row(
-        "SELECT id FROM entries WHERE date = ?1",
-        [date],
-        |row| row.get(0),
-    ) {
-        Ok(id) => id,
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            tx.commit()?;
-            return Ok(());
-        }
-        Err(e) => return Err(e),
-    };
+    let entry_id: i64 =
+        match tx.query_row("SELECT id FROM entries WHERE date = ?1", [date], |row| {
+            row.get(0)
+        }) {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                tx.commit()?;
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
     tx.execute(
         "DELETE FROM entry_task_links WHERE entry_id = ?1",
         [entry_id],
@@ -451,7 +450,7 @@ pub fn get_entry_task_links(conn: &Connection, date: &str) -> Result<Vec<TaskLin
          LEFT JOIN tasks t ON t.id = l.task_id
          JOIN entries e ON e.id = l.entry_id
          WHERE e.date = ?1
-         ORDER BY l.position ASC"
+         ORDER BY l.position ASC",
     )?;
     let rows = stmt.query_map([date], |row| {
         Ok(TaskLinkDto {

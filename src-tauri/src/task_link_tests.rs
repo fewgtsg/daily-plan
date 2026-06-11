@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::db::{
-        get_entry_task_links, init_test_db, replace_entry_task_links,
-    };
+    use crate::db::{get_entry_task_links, init_test_db, replace_entry_task_links};
     use crate::parser::ParsedTaskLink;
 
     fn create_entry(conn: &rusqlite::Connection, date: &str) -> i64 {
@@ -35,12 +33,7 @@ mod tests {
         let conn = init_test_db().unwrap();
         create_entry(&conn, "2024-02-01");
         create_task(&conn, "Task A");
-        replace_entry_task_links(
-            &conn,
-            "2024-02-01",
-            &[link("Task A", 0)],
-        )
-        .unwrap();
+        replace_entry_task_links(&conn, "2024-02-01", &[link("Task A", 0)]).unwrap();
         let links = get_entry_task_links(&conn, "2024-02-01").unwrap();
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].raw_text, "Task A");
@@ -52,12 +45,7 @@ mod tests {
     fn replace_entry_task_links_marks_missing_tasks_as_invalid() {
         let conn = init_test_db().unwrap();
         create_entry(&conn, "2024-02-02");
-        replace_entry_task_links(
-            &conn,
-            "2024-02-02",
-            &[link("Missing Task", 5)],
-        )
-        .unwrap();
+        replace_entry_task_links(&conn, "2024-02-02", &[link("Missing Task", 5)]).unwrap();
         let links = get_entry_task_links(&conn, "2024-02-02").unwrap();
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].raw_text, "Missing Task");
@@ -71,18 +59,8 @@ mod tests {
         create_entry(&conn, "2024-02-03");
         create_task(&conn, "Old Task");
         create_task(&conn, "New Task");
-        replace_entry_task_links(
-            &conn,
-            "2024-02-03",
-            &[link("Old Task", 0)],
-        )
-        .unwrap();
-        replace_entry_task_links(
-            &conn,
-            "2024-02-03",
-            &[link("New Task", 10)],
-        )
-        .unwrap();
+        replace_entry_task_links(&conn, "2024-02-03", &[link("Old Task", 0)]).unwrap();
+        replace_entry_task_links(&conn, "2024-02-03", &[link("New Task", 10)]).unwrap();
         let links = get_entry_task_links(&conn, "2024-02-03").unwrap();
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].raw_text, "New Task");
