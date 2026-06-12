@@ -15,3 +15,16 @@
     @apply bg-background text-foreground;
   }
 }
+
+.task-link-pill {
+  color: #2563eb;
+  background-color: #dbeafe;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.task-link-pill:hover {
+  background-color: #bfdbfe;
+}

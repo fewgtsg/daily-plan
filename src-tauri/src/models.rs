@@ -21,18 +21,31 @@ pub struct Task {
     pub updated_at: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct EntryTask {
-    pub id: i64,
-    pub entry_id: i64,
-    pub task_id: i64,
-    pub linked_at: String,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SearchResult {
     pub result_type: String,
     pub id: i64,
     pub date: Option<String>,
     pub content: String,
+}
+
+/// usage_count is the total number of entries and tasks using this tag globally.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TagDto {
+    pub id: i64,
+    pub name: String,
+    pub display_name: Option<String>,
+    pub usage_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskLinkDto {
+    pub id: i64,
+    pub entry_id: i64,
+    pub task_id: Option<i64>,
+    pub raw_text: String,
+    pub position: i64,
+    pub task_title: Option<String>,
 }

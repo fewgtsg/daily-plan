@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Entry, Task, SearchResult } from "../types";
+import type { Entry, Task, SearchResult, Tag, TaskLink, TagSearchResult } from "../types";
 
 let toastCallback: ((msg: string) => void) | null = null;
 export function setToastCallback(cb: (msg: string) => void) {
@@ -34,4 +34,36 @@ export const api = {
     safeInvoke("move_task_quadrant", { id, quadrant }),
 
   search: (query: string): Promise<SearchResult[] | null> => safeInvoke("search", { query: `"${query}"` }),
+
+  syncEntryTags: (date: string, content: string): Promise<null> =>
+    safeInvoke("sync_entry_tags", { date, content }),
+
+  addTagToEntry: (date: string, tagName: string): Promise<null> =>
+    safeInvoke("add_tag_to_entry", { date, tag_name: tagName }),
+
+  getEntryTags: (date: string): Promise<Tag[] | null> =>
+    safeInvoke("get_entry_tags", { date }),
+
+  getTaskTags: (taskId: number): Promise<Tag[] | null> =>
+    safeInvoke("get_task_tags", { task_id: taskId }),
+
+  getAllTags: (): Promise<Tag[] | null> => safeInvoke("get_all_tags"),
+
+  searchByTag: (tagName: string): Promise<TagSearchResult | null> =>
+    safeInvoke("search_by_tag", { tag_name: tagName }),
+
+  syncTaskTags: (taskId: number, content: string): Promise<null> =>
+    safeInvoke("sync_task_tags", { task_id: taskId, content }),
+
+  syncEntryTaskLinks: (date: string, content: string): Promise<null> =>
+    safeInvoke("sync_entry_task_links", { date, content }),
+
+  getEntryTaskLinks: (date: string): Promise<TaskLink[] | null> =>
+    safeInvoke("get_entry_task_links", { date }),
+
+  getAppSetting: (key: string): Promise<string | null> =>
+    safeInvoke("get_app_setting", { key }),
+
+  setAppSetting: (key: string, value: string): Promise<null> =>
+    safeInvoke("set_app_setting", { key, value }),
 };

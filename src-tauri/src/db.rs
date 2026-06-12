@@ -1,13 +1,21 @@
-use rusqlite::{Connection, Result};
+use rusqlite::{params, Connection, Result, Transaction};
 use std::fs;
 use tauri::Manager;
 
+use crate::models::{TagDto, TaskLinkDto};
+use crate::parser::ParsedTaskLink;
+
 pub fn init_app_db(app_handle: &tauri::AppHandle) -> Result<Connection> {
-    let app_dir = app_handle.path().app_local_data_dir().expect("Failed to get app data dir");
+    let app_dir = app_handle
+        .path()
+        .app_local_data_dir()
+        .expect("Failed to get app data dir");
     fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
     let db_path = app_dir.join("app.db");
     let conn = Connection::open(db_path)?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     create_tables(&conn)?;
+    create_v2_tables(&conn)?;
     Ok(conn)
 }
 
@@ -77,8 +85,308 @@ fn create_tables(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn create_v2_tables(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            display_name TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS entry_tags (
+            entry_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            PRIMARY KEY (entry_id, tag_id),
+            FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS task_tags (
+            task_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            PRIMARY KEY (task_id, tag_id),
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS entry_task_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_id INTEGER NOT NULL,
+            task_id INTEGER,
+            raw_text TEXT NOT NULL,
+            position INTEGER,
+            FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_entry_task_links_entry_id ON entry_task_links(entry_id);
+        CREATE INDEX IF NOT EXISTS idx_entry_task_links_task_id ON entry_task_links(task_id);
+
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );",
+    )?;
+    Ok(())
+}
+
+fn dedup_tags_preserve_order(tags: &[crate::parser::ParsedTag]) -> Vec<(String, String)> {
+    let mut seen = std::collections::HashSet::new();
+    let mut result = Vec::new();
+    for tag in tags {
+        if seen.insert(tag.normalized.clone()) {
+            result.push((tag.normalized.clone(), tag.original.clone()));
+        }
+    }
+    result
+}
+
+/// Upserts a tag. The display_name is set only on first insert; existing display_name is preserved.
+fn ensure_tag(tx: &Transaction, name: &str, display_name: &str) -> Result<i64> {
+    let _ = validate_tag_name(name)?;
+    tx.execute(
+        "INSERT INTO tags (name, display_name, created_at) VALUES (?1, ?2, datetime('now'))
+         ON CONFLICT(name) DO UPDATE SET display_name = COALESCE(tags.display_name, excluded.display_name)",
+        [name, display_name],
+    )?;
+    let tag_id: i64 = tx.query_row("SELECT id FROM tags WHERE name = ?1", [name], |row| {
+        row.get(0)
+    })?;
+    Ok(tag_id)
+}
+
+pub fn replace_entry_tags(
+    conn: &Connection,
+    date: &str,
+    tags: &[crate::parser::ParsedTag],
+) -> Result<()> {
+    let unique_tags = dedup_tags_preserve_order(tags);
+
+    let tx = conn.unchecked_transaction()?;
+    let entry_id: i64 =
+        match tx.query_row("SELECT id FROM entries WHERE date = ?1", [date], |row| {
+            row.get(0)
+        }) {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                tx.commit()?;
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
+    tx.execute("DELETE FROM entry_tags WHERE entry_id = ?1", [entry_id])?;
+    for (normalized, original) in &unique_tags {
+        let normalized_lower = normalized.to_lowercase();
+        validate_tag_name(&normalized_lower)?;
+        let tag_id = ensure_tag(&tx, &normalized_lower, original.as_str())?;
+        tx.execute(
+            "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
+            [entry_id, tag_id],
+        )?;
+    }
+    tx.commit()
+}
+
+pub fn replace_task_tags(
+    conn: &Connection,
+    task_id: i64,
+    tags: &[crate::parser::ParsedTag],
+) -> Result<()> {
+    let unique_tags = dedup_tags_preserve_order(tags);
+    let tx = conn.unchecked_transaction()?;
+    let exists: bool = tx
+        .query_row("SELECT 1 FROM tasks WHERE id = ?1", [task_id], |_| Ok(true))
+        .unwrap_or(false);
+    if !exists {
+        tx.commit()?;
+        return Ok(());
+    }
+    tx.execute("DELETE FROM task_tags WHERE task_id = ?1", [task_id])?;
+    for (normalized, original) in &unique_tags {
+        let normalized_lower = normalized.to_lowercase();
+        validate_tag_name(&normalized_lower)?;
+        let tag_id = ensure_tag(&tx, &normalized_lower, original.as_str())?;
+        tx.execute(
+            "INSERT OR IGNORE INTO task_tags (task_id, tag_id) VALUES (?1, ?2)",
+            [task_id, tag_id],
+        )?;
+    }
+    tx.commit()
+}
+
+fn validation_error(msg: &str) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        msg.to_string(),
+    )))
+}
+
+fn validate_tag_name(tag_name: &str) -> Result<String> {
+    let trimmed = tag_name.trim();
+    if trimmed.is_empty() {
+        return Err(validation_error("Tag name cannot be empty"));
+    }
+    if trimmed.chars().count() > 50 {
+        return Err(validation_error("Tag name must be 50 characters or fewer"));
+    }
+    if trimmed.chars().all(|c| c.is_ascii_digit()) {
+        return Err(validation_error("Tag name cannot be purely numeric"));
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(validation_error(
+            "Tag name can only contain letters, numbers, underscores, and hyphens",
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+pub fn add_tag_to_entry(conn: &Connection, date: &str, tag_name: &str) -> Result<()> {
+    let trimmed = validate_tag_name(tag_name)?;
+    let normalized = trimmed.to_lowercase();
+
+    let tx = conn.unchecked_transaction()?;
+    let entry_id: i64 =
+        match tx.query_row("SELECT id FROM entries WHERE date = ?1", [date], |row| {
+            row.get(0)
+        }) {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                tx.commit()?;
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
+    let tag_id = ensure_tag(&tx, &normalized, &trimmed)?;
+    tx.execute(
+        "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
+        [entry_id, tag_id],
+    )?;
+    tx.commit()
+}
+
+pub fn get_entry_tags(conn: &Connection, date: &str) -> Result<Vec<TagDto>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.name, t.display_name,
+                (SELECT COUNT(*) FROM entry_tags et WHERE et.tag_id = t.id) +
+                (SELECT COUNT(*) FROM task_tags tt WHERE tt.tag_id = t.id) AS usage_count
+         FROM tags t
+         JOIN entry_tags et ON et.tag_id = t.id
+         JOIN entries e ON e.id = et.entry_id
+         WHERE e.date = ?1
+         GROUP BY t.id
+         ORDER BY t.name ASC",
+    )?;
+    let rows = stmt.query_map([date], |row| {
+        Ok(TagDto {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            display_name: row.get(2)?,
+            usage_count: row.get(3)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn get_task_tags(conn: &Connection, task_id: i64) -> Result<Vec<TagDto>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.name, t.display_name,
+                (SELECT COUNT(*) FROM entry_tags et WHERE et.tag_id = t.id) +
+                (SELECT COUNT(*) FROM task_tags tt WHERE tt.tag_id = t.id) AS usage_count
+         FROM tags t
+         JOIN task_tags tt ON tt.tag_id = t.id
+         WHERE tt.task_id = ?1
+         ORDER BY t.name ASC",
+    )?;
+    let rows = stmt.query_map([task_id], |row| {
+        Ok(TagDto {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            display_name: row.get(2)?,
+            usage_count: row.get(3)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn get_all_tags(conn: &Connection) -> Result<Vec<TagDto>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.name, t.display_name,
+                (SELECT COUNT(*) FROM entry_tags et WHERE et.tag_id = t.id) +
+                (SELECT COUNT(*) FROM task_tags tt WHERE tt.tag_id = t.id) AS usage_count
+         FROM tags t
+         ORDER BY usage_count DESC, t.name ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(TagDto {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            display_name: row.get(2)?,
+            usage_count: row.get(3)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn search_entries_by_tag(
+    conn: &Connection,
+    tag_name: &str,
+) -> Result<Vec<crate::models::Entry>> {
+    let trimmed = validate_tag_name(tag_name)?;
+    // Query entries that have the given tag
+    let mut stmt = conn.prepare(
+        "SELECT e.id, e.date, e.content, e.created_at, e.updated_at
+         FROM entries e
+         JOIN entry_tags et ON et.entry_id = e.id
+         JOIN tags t ON t.id = et.tag_id
+         WHERE t.name = ?1
+         ORDER BY e.date DESC",
+    )?;
+    let rows = stmt.query_map([trimmed.to_lowercase()], |row| {
+        Ok(crate::models::Entry {
+            id: row.get(0)?,
+            date: row.get(1)?,
+            content: row.get(2)?,
+            created_at: row.get(3)?,
+            updated_at: row.get(4)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn search_tasks_by_tag(conn: &Connection, tag_name: &str) -> Result<Vec<crate::models::Task>> {
+    let trimmed = validate_tag_name(tag_name)?;
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.title, t.description, t.quadrant, t.status, t.created_at, t.completed_at, t.updated_at
+         FROM tasks t
+         JOIN task_tags tt ON tt.task_id = t.id
+         JOIN tags tg ON tg.id = tt.tag_id
+         WHERE tg.name = ?1
+         ORDER BY t.updated_at DESC"
+    )?;
+    let rows = stmt.query_map([trimmed.to_lowercase()], |row| {
+        Ok(crate::models::Task {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            description: row.get(2)?,
+            quadrant: row.get(3)?,
+            status: row.get(4)?,
+            created_at: row.get(5)?,
+            completed_at: row.get(6)?,
+            updated_at: row.get(7)?,
+        })
+    })?;
+    rows.collect()
+}
+
 pub fn backup_db(app_handle: &tauri::AppHandle) -> std::io::Result<()> {
-    let app_dir = app_handle.path().app_local_data_dir().expect("Failed to get app data dir");
+    let app_dir = app_handle
+        .path()
+        .app_local_data_dir()
+        .expect("Failed to get app data dir");
     let db_path = app_dir.join("app.db");
     let backup_dir = app_dir.join("backups");
     std::fs::create_dir_all(&backup_dir)?;
@@ -95,4 +403,92 @@ pub fn backup_db(app_handle: &tauri::AppHandle) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+pub fn replace_entry_task_links(
+    conn: &Connection,
+    date: &str,
+    links: &[ParsedTaskLink],
+) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    let entry_id: i64 =
+        match tx.query_row("SELECT id FROM entries WHERE date = ?1", [date], |row| {
+            row.get(0)
+        }) {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                tx.commit()?;
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
+    tx.execute(
+        "DELETE FROM entry_task_links WHERE entry_id = ?1",
+        [entry_id],
+    )?;
+    for link in links {
+        let task_id: Option<i64> = tx
+            .query_row(
+                "SELECT id FROM tasks WHERE title = ?1",
+                [link.raw_text.trim()],
+                |row| row.get(0),
+            )
+            .ok();
+        tx.execute(
+            "INSERT INTO entry_task_links (entry_id, task_id, raw_text, position) VALUES (?1, ?2, ?3, ?4)",
+            params![entry_id, task_id, link.raw_text.clone(), link.position as i64],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn get_entry_task_links(conn: &Connection, date: &str) -> Result<Vec<TaskLinkDto>> {
+    let mut stmt = conn.prepare(
+        "SELECT l.id, l.entry_id, l.task_id, l.raw_text, l.position, t.title
+         FROM entry_task_links l
+         LEFT JOIN tasks t ON t.id = l.task_id
+         JOIN entries e ON e.id = l.entry_id
+         WHERE e.date = ?1
+         ORDER BY l.position ASC",
+    )?;
+    let rows = stmt.query_map([date], |row| {
+        Ok(TaskLinkDto {
+            id: row.get(0)?,
+            entry_id: row.get(1)?,
+            task_id: row.get(2)?,
+            raw_text: row.get(3)?,
+            position: row.get(4)?,
+            task_title: row.get(5)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>> {
+    let mut stmt = conn.prepare("SELECT value FROM app_settings WHERE key = ?1")?;
+    let mut rows = stmt.query([key])?;
+    if let Some(row) = rows.next()? {
+        Ok(Some(row.get(0)?))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [key, value],
+    )?;
+    Ok(())
+}
+
+#[cfg(test)]
+pub fn init_test_db() -> Result<Connection> {
+    let conn = Connection::open_in_memory()?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    create_tables(&conn)?;
+    create_v2_tables(&conn)?;
+    Ok(conn)
 }

@@ -1,7 +1,7 @@
-use rusqlite::{Connection, Result};
 use crate::models::SearchResult;
-use tauri::State;
+use rusqlite::{Connection, Result};
 use std::sync::Mutex;
+use tauri::State;
 
 pub fn search_all(conn: &Connection, query: &str) -> Result<Vec<SearchResult>> {
     let mut results = Vec::new();
@@ -39,7 +39,10 @@ pub fn search_all(conn: &Connection, query: &str) -> Result<Vec<SearchResult>> {
 }
 
 #[tauri::command]
-pub fn search(state: State<'_, Mutex<Connection>>, query: String) -> Result<Vec<SearchResult>, String> {
+pub fn search(
+    state: State<'_, Mutex<Connection>>,
+    query: String,
+) -> Result<Vec<SearchResult>, String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     search_all(&conn, &query).map_err(|e| e.to_string())
 }

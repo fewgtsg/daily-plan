@@ -1,7 +1,7 @@
-use rusqlite::{params, Connection, Result};
 use crate::models::Task;
-use tauri::State;
+use rusqlite::{params, Connection, Result};
 use std::sync::Mutex;
+use tauri::State;
 
 pub fn list_tasks(conn: &Connection, status_filter: Option<String>) -> Result<Vec<Task>> {
     let sql = match status_filter {
@@ -29,7 +29,12 @@ fn row_to_task(row: &rusqlite::Row) -> Result<Task> {
     })
 }
 
-pub fn create_task(conn: &Connection, title: &str, description: &str, quadrant: i32) -> Result<Task> {
+pub fn create_task(
+    conn: &Connection,
+    title: &str,
+    description: &str,
+    quadrant: i32,
+) -> Result<Task> {
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO tasks (title, description, quadrant, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -48,7 +53,13 @@ pub fn create_task(conn: &Connection, title: &str, description: &str, quadrant: 
     })
 }
 
-pub fn update_task(conn: &Connection, id: i64, title: &str, description: &str, quadrant: i32) -> Result<()> {
+pub fn update_task(
+    conn: &Connection,
+    id: i64,
+    title: &str,
+    description: &str,
+    quadrant: i32,
+) -> Result<()> {
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "UPDATE tasks SET title = ?1, description = ?2, quadrant = ?3, updated_at = ?4 WHERE id = ?5",
@@ -81,19 +92,33 @@ pub fn update_task_quadrant(conn: &Connection, id: i64, quadrant: i32) -> Result
 }
 
 #[tauri::command]
-pub fn get_tasks(state: State<'_, Mutex<Connection>>, status: Option<String>) -> Result<Vec<Task>, String> {
+pub fn get_tasks(
+    state: State<'_, Mutex<Connection>>,
+    status: Option<String>,
+) -> Result<Vec<Task>, String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     list_tasks(&conn, status).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn add_task(state: State<'_, Mutex<Connection>>, title: String, description: String, quadrant: i32) -> Result<Task, String> {
+pub fn add_task(
+    state: State<'_, Mutex<Connection>>,
+    title: String,
+    description: String,
+    quadrant: i32,
+) -> Result<Task, String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     create_task(&conn, &title, &description, quadrant).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn edit_task(state: State<'_, Mutex<Connection>>, id: i64, title: String, description: String, quadrant: i32) -> Result<(), String> {
+pub fn edit_task(
+    state: State<'_, Mutex<Connection>>,
+    id: i64,
+    title: String,
+    description: String,
+    quadrant: i32,
+) -> Result<(), String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     update_task(&conn, id, &title, &description, quadrant).map_err(|e| e.to_string())
 }
@@ -111,7 +136,11 @@ pub fn remove_task(state: State<'_, Mutex<Connection>>, id: i64) -> Result<(), S
 }
 
 #[tauri::command]
-pub fn move_task_quadrant(state: State<'_, Mutex<Connection>>, id: i64, quadrant: i32) -> Result<(), String> {
+pub fn move_task_quadrant(
+    state: State<'_, Mutex<Connection>>,
+    id: i64,
+    quadrant: i32,
+) -> Result<(), String> {
     let conn = state.lock().map_err(|e| e.to_string())?;
     update_task_quadrant(&conn, id, quadrant).map_err(|e| e.to_string())
 }
