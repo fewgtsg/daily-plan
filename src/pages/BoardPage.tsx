@@ -6,9 +6,11 @@ import {
   useDroppable,
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { TagInput } from '@/components/TagInput';
 import { api } from '@/lib/api';
-import type { Task } from '@/types';
+import type { Task, Tag } from '@/types';
 
 const quadrantLabels: Record<number, { label: string; color: string }> = {
   1: { label: '重要紧急', color: 'bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-900' },
@@ -18,8 +20,13 @@ const quadrantLabels: Record<number, { label: string; color: string }> = {
 };
 
 function TaskCard({ task, onFinish, onDelete }: { task: Task; onFinish: (id: number) => void; onDelete: (id: number) => void }) {
+  const [tags, setTags] = useState<Tag[]>([]);
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `task-${task.id}`, data: task });
   const style = { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.5 : 1 };
+
+  useEffect(() => {
+    api.getTaskTags(task.id).then((data) => data && setTags(data));
+  }, [task.id]);
 
   return (
     <div
@@ -31,6 +38,15 @@ function TaskCard({ task, onFinish, onDelete }: { task: Task; onFinish: (id: num
     >
       <div className="font-medium text-sm">{task.title}</div>
       <div className="text-xs text-muted-foreground truncate">{task.description}</div>
+      {tags.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {tags.map((tag) => (
+            <Badge key={tag.id} variant="outline" className="text-[10px] px-1 py-0">
+              {tag.displayName || tag.name}
+            </Badge>
+          ))}
+        </div>
+      )}
       <div className="flex gap-2 mt-1">
         {task.status !== 'completed' && (
           <button className="text-xs text-green-600 hover:underline" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onFinish(task.id); }}>完成</button>
@@ -68,8 +84,23 @@ function QuadrantColumn({ quadrant, tasks, onFinish, onDelete }: { quadrant: num
 
 export function BoardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [taskTags, setTaskTags] = useState<Record<number, Tag[]>>({});
+  const [tagFilter, setTagFilter] = useState("");
 
-  const loadTasks = () => api.getTasks().then((data) => { if (data) setTasks(data); }).catch((err) => console.error(err));
+  const loadTasks = () => {
+    api.getTasks().then(async (data) => {
+      if (!data) return;
+      setTasks(data);
+      const tagsMap: Record<number, Tag[]> = {};
+      await Promise.all(
+        data.map(async (task) => {
+          const tags = await api.getTaskTags(task.id);
+          if (tags) tagsMap[task.id] = tags;
+        })
+      );
+      setTaskTags(tagsMap);
+    }).catch((err) => console.error(err));
+  };
 
   useEffect(() => {
     loadTasks();
@@ -90,7 +121,13 @@ export function BoardPage() {
     const title = prompt('任务标题');
     if (!title) return;
     const description = prompt('任务描述（可选）') || '';
-    api.addTask(title, description, quadrant).then(loadTasks).catch((err) => console.error(err));
+    api.addTask(title, description, quadrant).then((task) => {
+      if (task) {
+        api.syncTaskTags(task.id, `${title} ${description}`).then(loadTasks);
+      } else {
+        loadTasks();
+      }
+    }).catch((err) => console.error(err));
   };
 
   const finishTask = (id: number) => {
@@ -109,15 +146,26 @@ export function BoardPage() {
     }
   };
 
+  const filteredTasks = useMemo(() => {
+    if (!tagFilter.trim()) return tasks;
+    const filter = tagFilter.toLowerCase();
+    return tasks.filter((t) =>
+      taskTags[t.id]?.some((tag) => tag.name.toLowerCase() === filter || tag.displayName?.toLowerCase() === filter)
+    );
+  }, [tasks, taskTags, tagFilter]);
+
   const tasksByQuadrant = useMemo(() => {
     const map: Record<number, Task[]> = { 1: [], 2: [], 3: [], 4: [] };
-    tasks.forEach((t) => { if (map[t.quadrant]) map[t.quadrant].push(t); });
+    filteredTasks.forEach((t) => { if (map[t.quadrant]) map[t.quadrant].push(t); });
     return map;
-  }, [tasks]);
+  }, [filteredTasks]);
 
   return (
     <div className="h-full flex flex-col">
-      <h2 className="text-xl font-bold mb-4">四象限任务看板</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold">四象限任务看板</h2>
+        <TagInput value={tagFilter} onChange={setTagFilter} />
+      </div>
       <DndContext onDragEnd={handleDragEnd}>
         <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-4 min-h-0">
           {[1, 2, 3, 4].map((q) => (
