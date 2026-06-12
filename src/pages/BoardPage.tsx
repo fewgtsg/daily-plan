@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   DndContext,
   DragEndEvent,
+  DragOverlay,
   useDraggable,
   useDroppable,
 } from '@dnd-kit/core';
@@ -19,7 +20,7 @@ const quadrantLabels: Record<number, { label: string; color: string }> = {
   4: { label: '不紧急不重要', color: 'bg-gray-50 border-gray-200 dark:bg-gray-900/30 dark:border-gray-800' },
 };
 
-function TaskCard({ task, onFinish, onDelete }: { task: Task; onFinish: (id: number) => void; onDelete: (id: number) => void }) {
+function TaskCard({ task, onFinish, onDelete, isOverlay }: { task: Task; onFinish: (id: number) => void; onDelete: (id: number) => void; isOverlay?: boolean }) {
   const [tags, setTags] = useState<Tag[]>([]);
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `task-${task.id}`, data: task });
   const style = { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.5 : 1 };
@@ -34,7 +35,7 @@ function TaskCard({ task, onFinish, onDelete }: { task: Task; onFinish: (id: num
       {...listeners}
       {...attributes}
       style={style}
-      className={`p-2 mb-2 border rounded bg-white dark:bg-card cursor-move ${task.status === 'completed' ? 'opacity-50 line-through' : ''}`}
+      className={`p-2 mb-2 border rounded bg-white dark:bg-card cursor-move transition-all duration-150 ${task.status === 'completed' ? 'opacity-50 line-through' : ''} ${isOverlay ? 'scale-[1.02] shadow-xl rotate-1' : 'shadow-sm'}`}
     >
       <div className="font-medium text-sm">{task.title}</div>
       <div className="text-xs text-muted-foreground truncate">{task.description}</div>
@@ -64,7 +65,7 @@ function QuadrantColumn({ quadrant, tasks, onFinish, onDelete }: { quadrant: num
   return (
     <div
       ref={setNodeRef}
-      className={`flex-1 border rounded-lg p-3 flex flex-col ${info.color} ${isOver ? 'ring-2 ring-primary' : ''}`}
+      className={`flex-1 border rounded-lg p-3 flex flex-col ${info.color} transition-colors ${isOver ? 'ring-2 ring-primary bg-primary/5' : ''}`}
     >
       <div className="font-semibold text-sm mb-2 flex justify-between items-center">
         <span>{info.label}</span>
@@ -86,6 +87,7 @@ export function BoardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskTags, setTaskTags] = useState<Record<number, Tag[]>>({});
   const [tagFilter, setTagFilter] = useState("");
+  const [activeTask, setActiveTask] = useState<Task | null>(null);
 
   const loadTasks = () => {
     api.getTasks().then(async (data) => {
@@ -166,12 +168,25 @@ export function BoardPage() {
         <h2 className="text-xl font-bold">四象限任务看板</h2>
         <TagInput value={tagFilter} onChange={setTagFilter} />
       </div>
-      <DndContext onDragEnd={handleDragEnd}>
+      <DndContext
+        onDragStart={(event) => {
+          const taskId = Number(String(event.active.id).replace('task-', ''));
+          const task = tasks.find((t) => t.id === taskId) || null;
+          setActiveTask(task);
+        }}
+        onDragEnd={(event) => {
+          setActiveTask(null);
+          handleDragEnd(event);
+        }}
+      >
         <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-4 min-h-0">
           {[1, 2, 3, 4].map((q) => (
             <QuadrantColumn key={q} quadrant={q} tasks={tasksByQuadrant[q]} onFinish={finishTask} onDelete={deleteTask} />
           ))}
         </div>
+        <DragOverlay>
+          {activeTask ? <TaskCard task={activeTask} onFinish={() => {}} onDelete={() => {}} isOverlay /> : null}
+        </DragOverlay>
       </DndContext>
       <div className="mt-4 flex gap-2">
         {[1, 2, 3, 4].map((q) => (
