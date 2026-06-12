@@ -22,7 +22,7 @@ const quadrantLabels: Record<number, { label: string; color: string }> = {
 
 function TaskCard({ task, onFinish, onDelete, isOverlay }: { task: Task; onFinish: (id: number) => void; onDelete: (id: number) => void; isOverlay?: boolean }) {
   const [tags, setTags] = useState<Tag[]>([]);
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `task-${task.id}`, data: task });
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `task-${task.id}`, data: task, disabled: isOverlay });
   const style = { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.5 : 1 };
 
   useEffect(() => {
@@ -32,10 +32,10 @@ function TaskCard({ task, onFinish, onDelete, isOverlay }: { task: Task; onFinis
   return (
     <div
       ref={setNodeRef}
-      {...listeners}
-      {...attributes}
+      {...(isOverlay ? {} : listeners)}
+      {...(isOverlay ? {} : attributes)}
       style={style}
-      className={`p-2 mb-2 border rounded bg-white dark:bg-card cursor-move transition-all duration-150 ${task.status === 'completed' ? 'opacity-50 line-through' : ''} ${isOverlay ? 'scale-[1.02] shadow-xl rotate-1' : 'shadow-sm'}`}
+      className={`p-2 mb-2 border rounded bg-white dark:bg-card cursor-move ${task.status === 'completed' ? 'opacity-50 line-through' : ''} ${isOverlay ? 'scale-[1.02] shadow-xl rotate-1' : 'shadow-sm'}`}
     >
       <div className="font-medium text-sm">{task.title}</div>
       <div className="text-xs text-muted-foreground truncate">{task.description}</div>
